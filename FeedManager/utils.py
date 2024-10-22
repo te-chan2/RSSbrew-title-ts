@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import logging
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 import os
-from openai import OpenAI
+from litellm import completion
 import tiktoken
 
 logger = logging.getLogger('feed_logger')
@@ -175,21 +175,11 @@ def match_content(entry, filter):
 def generate_summary(article, model, output_mode='HTML', prompt=None, other_model=''):
     if model == 'other':
         model = other_model
-    if not model or not OPENAI_API_KEY:
-        logger.warning('  OpenAI API key or model not set, skipping summary generation')
+    if not model:
+        logger.warning('Model not set, skipping summary generation')
         return 
     try:
-        client_params = {
-            "api_key": OPENAI_API_KEY,
-            "base_url": OPENAI_BASE_URL
-        }
-        completion_params = {
-            "model": model,
-        }
-        if OPENAI_PROXY:
-            client_params["http_client"] = httpx.Client(proxy=OPENAI_PROXY)
-
-        client = OpenAI(**client_params)
+        completion_params = {}
         if output_mode == 'json':
             truncated_query = clean_txt_and_truncate(article.content, model, clean_bool=True)
             #additional_prompt = f"Please summarize this article, and output the result only in JSON format. First item of the json is a one-line summary in 15 words named as 'summary_one_line', second item is the 150-word summary named as 'summary_long'. Output result in {language} language."
@@ -199,7 +189,6 @@ def generate_summary(article, model, output_mode='HTML', prompt=None, other_mode
                 {"role": "assistant", "content": f"{prompt}"},
             ]
             completion_params["response_format"] = { "type": "json_object" }
-            completion_params["messages"] = messages
         elif output_mode == 'HTML':
             truncated_query = clean_txt_and_truncate(article.content, model, clean_bool=False)
             messages = [
@@ -207,10 +196,13 @@ def generate_summary(article, model, output_mode='HTML', prompt=None, other_mode
                 {"role": "user", "content": f"{truncated_query}"},
                 {"role": "assistant", "content": f"{prompt}"},
             ]
-            completion_params["messages"] = messages
-        completion = client.chat.completions.create(**completion_params)
+        response = completion(
+            model=model,
+            messages=messages,
+            **completion_params
+        )
         logger.debug(f"prompt is {prompt}")
-        return completion.choices[0].message.content
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f'Failed to generate summary for article {article.title}: {str(e)}')
     
